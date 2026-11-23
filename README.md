@@ -204,6 +204,28 @@ Rules live in `app/services/social_service.py` and `app/services/post_service.py
 SQL in `app/db/social_repository.py` and `app/db/post_repository.py`.
 New posts appear in the feed immediately; the search index is still built only at startup.
 
+## Week 7: offline evaluation
+
+Which feed strategy puts the posts a user will like into their top 10? A time-split
+replay over the seeded MovieLens database, run through the same `FeedService.get_feed`
+that `GET /feed` uses. Protocol and limitations: [`docs/evaluation-protocol.md`](docs/evaluation-protocol.md).
+
+```bash
+pip install -e ".[dev,eval]"            # eval = pandas + matplotlib, not needed by the API
+python scripts/seed_movielens.py
+python scripts/evaluate.py              # [--db instakill.db] [--cutoff 2016-02-01] [--seed 42] [--out reports/]
+```
+
+| Output | Content |
+|---|---|
+| `reports/eval_results.csv` | NDCG@10 per user and strategy |
+| `reports/baseline_table.md` | means with 95 % bootstrap intervals, `learned` minus the best baseline per slice, run metadata |
+| `reports/dashboard.html` | static page with the charts (double-click to open; not served by the API) |
+
+The two first files are byte-identical for the same database and arguments.
+Result on the seeded data: `learned` 0.149 vs `popularity` 0.107 mean NDCG@10 over 25 users,
+difference `+0.041 [-0.030, +0.126]`: **unclear** overall, a win only for casual users.
+
 ## Milestones (see masterplan.md for full details)
 
 W1 Repo+API → W3 CRUD+DB → W4 Feed v0 → W7 Baseline+eval plan → W9 ML+pretrained feature → W11 Profile+optimize → W13 Feature freeze+E2E → W14 Red-team+Demo Day.
