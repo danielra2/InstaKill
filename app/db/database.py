@@ -17,6 +17,24 @@ CREATE TABLE IF NOT EXISTS post (
     content TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Week 4: who follows whom.
+CREATE TABLE IF NOT EXISTS follow (
+    follower_id INTEGER NOT NULL REFERENCES user(id),
+    followee_id INTEGER NOT NULL REFERENCES user(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (follower_id, followee_id),
+    CHECK (follower_id <> followee_id)
+);
+
+-- Week 4: which user liked which post. "like" is an SQL keyword, so it is quoted.
+CREATE TABLE IF NOT EXISTS "like" (
+    user_id INTEGER NOT NULL REFERENCES user(id),
+    post_id INTEGER NOT NULL REFERENCES post(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, post_id)
+);
+CREATE INDEX IF NOT EXISTS idx_like_post ON "like"(post_id);
 """
 
 

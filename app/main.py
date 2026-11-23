@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.feed import router as feed_router
 from app.api.search import router as search_router
 from app.db.database import init_db
 from app.db.post_repository import SqlitePostRepository
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="InstaKill", lifespan=lifespan)
 app.include_router(search_router)
+app.include_router(feed_router)
 
 
 @app.get("/health")

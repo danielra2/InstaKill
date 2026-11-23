@@ -63,6 +63,77 @@ the index.
 Tests never load the real model: they inject a small fake encoder
 (`tests/fakes.py`) and override the FastAPI dependency.
 
+## Feed (Week 4)
+
+`GET /feed?user_id=<int>&limit=<1..50>&strategy=for_you|chronological`.
+Full contract: [`docs/api-contract.md`](docs/api-contract.md).
+
+```bash
+python scripts/seed_db.py          # RESETS and re-seeds users, posts, follows, likes
+uvicorn app.main:app --reload
+curl "localhost:8000/feed?user_id=1&limit=5"
+curl "localhost:8000/feed?user_id=1&strategy=chronological"
+```
+
+### How the code is split
+
+| Layer | File | Responsibility |
+|---|---|---|
+| Data | `app/db/database.py`, `app/db/seed.py` (run via `scripts/seed_db.py`) | `follow` and `like` tables (created at startup); seed with 8 users, 24 posts, 18 follows, 28 likes. |
+| Repository | `app/db/feed_repository.py` | `SqliteFeedRepository`: the only feed code that runs SQL. |
+| Pure ranking | `app/feed/ranking.py` | `rank_feed(candidates, signals, now, weights, limit)` and `chronological_feed`. Heap-based top-k, no clock, no I/O, inputs not mutated. |
+| Service | `app/services/feed_service.py` | `FeedService.get_feed`: validates, reads the clock once, builds signals, calls the ranker. |
+| HTTP edge | `app/api/feed.py` | Parses `user_id` / `limit` / `strategy`, maps errors to 404/422, formats JSON. |
+
+### Candidates and cold start
+
+Candidates are **all posts except** the viewer's own posts and posts the viewer
+already liked (we do not restrict to followed authors, so small accounts still get
+a full feed; following an author boosts their posts through *affinity* instead).
+
+A user who **follows nobody and liked nothing** (in the seed: `heidi`, id 8) has
+affinity 0 for every post, so their `for_you` feed is ranked by **freshness +
+popularity** only: recent posts that many people liked. They never get an empty
+feed while other people's posts exist.
+
+### Signals, formula and default weights
+
+```text
+score = 1.0 * freshness + 2.0 * affinity + 1.0 * popularity
+
+freshness  = 0.5 ** (age_hours / 24)            1.0 for a brand-new post, 0.5 after one day
+affinity   = 0.5 * [viewer follows the author]
+           + 0.5 * (viewer's likes on this author / viewer's likes on their most-liked author)
+popularity = likes on this post / most likes on any candidate post
+```
+
+Every signal is in [0, 1], so the weights alone decide how much each one counts.
+Why these weights: affinity gets **2.0** because the main promise of a "for you"
+feed is personal content: a followed author should beat a random popular post.
+Freshness and popularity get **1.0** each so that, among posts with similar affinity,
+new and well-liked posts come first, and so a cold-start user (affinity 0) still
+gets a sensible mix of new and popular posts. The half-life of **24 hours** fits a
+social app where posts are mostly read within a day. These are reasoned defaults;
+they will be checked against the `chronological` baseline in the Week 7 evaluation.
+
+Ties on score (and on `created_at` for `chronological`) are broken by ascending `post_id`.
+
+### Complexity of one `GET /feed` request
+
+With *C* candidate posts and limit *k*:
+
+- the database reads are one pass each over posts, follows and likes;
+- building signals is O(C), plus O(L) to count likes (L = number of likes);
+- scoring is O(1) per candidate, so O(C);
+- `heapq.nsmallest` keeps only the best *k*: O(C log k) instead of O(C log C) for a full sort.
+
+Total: **O(C log k)** (plus O(L) for the like counts). The first thing to
+**precompute** is the per-post part that is the same for every viewer:
+**like counts / popularity** (today `post_like_counts()` counts every like on each
+request). It could be kept as a `like_count` column updated when a like is added, or
+cached and refreshed every few minutes. Freshness depends only on `now`, so it could
+also be computed once per request batch instead of once per user.
+
 ## Milestones (see masterplan.md for full details)
 
 W1 Repo+API → W3 CRUD+DB → W4 Feed v0 → W7 Baseline+eval plan → W9 ML+pretrained feature → W11 Profile+optimize → W13 Feature freeze+E2E → W14 Red-team+Demo Day.

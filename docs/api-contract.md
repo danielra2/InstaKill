@@ -1,7 +1,62 @@
 # API contract
 
+- [`GET /feed`](#get-feed): **implemented** (Week 4)
 - [`GET /search`](#get-search): **implemented** (Week 3)
 - [`POST /posts`](#post-posts): planned, not implemented (Week 2)
+
+## `GET /feed`
+
+> Status: **implemented** in `app/api/feed.py` (Week 4).
+
+Returns the posts a user should see, ranked either by the `for_you` score or
+newest first.
+
+### Request
+
+`GET /feed?user_id=<int>&limit=<n>&strategy=<strategy>`
+
+| Parameter  | Type    | Required | Rules |
+|------------|---------|----------|-------|
+| `user_id`  | integer | yes      | Id of the viewing user. Must exist. |
+| `limit`    | integer | no (default `20`) | 1–50 inclusive. |
+| `strategy` | string  | no (default `for_you`) | `for_you` or `chronological`. |
+
+Candidates: every post **except** the viewer's own posts and posts the viewer already liked.
+
+### Successful response
+
+`200 OK`, strategy `for_you`:
+
+```json
+{
+  "user_id": 1,
+  "strategy": "for_you",
+  "posts": [
+    {"post_id": 22, "user_id": 6, "content": "new camera lens arrived today", "created_at": "2026-11-23T08:00:00", "score": 2.917},
+    {"post_id": 12, "user_id": 6, "content": "golden hour shots from the old town", "created_at": "2026-11-22T23:00:00", "score": 2.707}
+  ]
+}
+```
+
+`200 OK`, strategy `chronological`: same shape, but posts have **no `score`** field.
+
+- `posts` has **at most** `limit` items (fewer if there are fewer candidates).
+- `user_id` inside a post is the **author**; the top-level `user_id` is the viewer.
+- `created_at` is UTC, ISO 8601, without a timezone suffix.
+- `for_you`: ordered by **descending `score`**, ties by **ascending `post_id`**.
+  `score = 1.0 * freshness + 2.0 * affinity + 1.0 * popularity` (see README).
+- `chronological`: ordered by **newest `created_at`**, ties by **ascending `post_id`**.
+
+### Validation and error cases
+
+| Status | When | Example body |
+|--------|------|--------------|
+| `404 Not Found` | `user_id` does not exist. | `{"detail": "User 999 does not exist."}` |
+| `422 Unprocessable Entity` | `user_id` missing or not an integer. | FastAPI's standard `{"detail": [...]}` |
+| `422 Unprocessable Entity` | `limit` not an integer, < 1 or > 50. | FastAPI's standard `{"detail": [...]}` |
+| `422 Unprocessable Entity` | `strategy` is not `for_you` or `chronological`. | FastAPI's standard `{"detail": [...]}` |
+
+---
 
 ## `GET /search`
 
