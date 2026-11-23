@@ -134,6 +134,76 @@ request). It could be kept as a `like_count` column updated when a like is added
 cached and refreshed every few minutes. Freshness depends only on `now`, so it could
 also be computed once per request batch instead of once per user.
 
+## Week 5: real data, CRUD and the learned feed
+
+Three things were added this week:
+
+1. **MovieLens data** (`app/db/movielens.py`, run via `scripts/seed_movielens.py`).
+2. **CRUD endpoints** for users, posts, follows and likes (`app/api/social.py`).
+3. **`GET /feed?strategy=learned`**: ranks posts with the small neural network trained in
+   Lab 5 (`models/like_model.npz`); the score is the predicted probability of a like.
+
+```bash
+# 1. download https://files.grouplens.org/datasets/movielens/ml-latest-small.zip
+#    and put the .zip in the repo folder (it is git-ignored: never commit it)
+python scripts/seed_movielens.py               # RESETS the db: 610 users, 9,724 posts, 48,580 likes, 4,310 follows
+uvicorn app.main:app --reload                  # first start also builds the search index over 9.7k posts (~1 min on CPU)
+curl "localhost:8000/feed?user_id=414&limit=5&strategy=learned"
+```
+
+`python scripts/seed_db.py` still gives the small synthetic dataset (the tests use it).
+
+### How MovieLens becomes a social network
+
+| MovieLens | InstaKill |
+|---|---|
+| user `u` | user `ml_user_<u>` with the same id |
+| a movie (rated at least once) | a **post**: content = title, tags = genres (`post_tag` table), `created_at` = time of its **first** rating |
+| the user who gave that first rating | the post's **author** |
+| a rating **>= 4.0** | a **like**, at the rating's real time |
+| A liked **3** posts authored by B (A != B) | A **follows** B, dated at that 3rd like |
+
+These are our own rules (the data has no authors and no follows); they are fixed
+constants at the top of `app/db/movielens.py`. Times are the real 1996-2018 times, so
+`for_you` freshness is ~0 for every post; `--shift-to-now` moves all times forward so
+the last rating is "now".
+
+### The learned strategy
+
+| Layer | File | Responsibility |
+|---|---|---|
+| Model file | `models/like_model.npz` | Lab 5 output: W1 (6x16), b1, W2 (16x1), b2 = 129 numbers, plus `mu`/`sd` and the signal constants. |
+| Pure scorer | `app/feed/learned.py` | `load_model`, `compute_signals` (the 6 Lab 5 signals), `predict` (standardize -> tanh -> sigmoid), `top_k`. |
+| Repository | `app/db/feed_repository.py` | new reads: post tags, the viewer's liked-tag counts and like count, likes since a date. |
+| Service | `app/services/feed_service.py` | `FeedStrategy.LEARNED`: candidates -> signals -> `predict` -> top k. |
+
+The 6 signals are the ones the model was trained on (Lab 5), computed for the viewer at "now":
+
+```text
+freshness  = 0.5 ** (age_days / 1095)                     half life 3 years
+affinity   = sum of the viewer's liked-tag counts over the post's tags
+             / (viewer's total liked-tag count * number of tags of the post)
+popularity = likes in the last 365 days / max of that over all posts
+activity   = min(1, log1p(viewer's likes) / log1p(500))
+lifetime   = log1p(likes ever) / log1p(max likes ever on any post)
+age        = min(1, age_days / 9125)                      capped at 25 years
+```
+
+Candidates are the same as for the other strategies (no own posts, no already-liked
+posts). Order: descending P(like), ties by ascending `post_id`. A user with no likes
+gets affinity 0 and activity 0 and still a full feed. Posts created through
+`POST /posts` have no tags, so their affinity is 0. `tests/test_learned.py` checks the
+three "golden rows" printed by Lab 5 against `predict`.
+
+### CRUD endpoints
+
+`POST /users`, `GET /users/{id}`, `POST /posts`, `GET /posts/{id}`,
+`POST /follows`, `DELETE /follows`, `POST /likes`, `DELETE /likes`.
+Full contract with status codes: [`docs/api-contract.md`](docs/api-contract.md).
+Rules live in `app/services/social_service.py` and `app/services/post_service.py`;
+SQL in `app/db/social_repository.py` and `app/db/post_repository.py`.
+New posts appear in the feed immediately; the search index is still built only at startup.
+
 ## Milestones (see masterplan.md for full details)
 
 W1 Repo+API → W3 CRUD+DB → W4 Feed v0 → W7 Baseline+eval plan → W9 ML+pretrained feature → W11 Profile+optimize → W13 Feature freeze+E2E → W14 Red-team+Demo Day.

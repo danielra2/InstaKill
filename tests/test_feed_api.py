@@ -79,3 +79,24 @@ def test_client_errors_are_422(client, params):
     response = client.get("/feed", params=params)
     assert response.status_code == 422
     assert "detail" in response.json()
+
+
+# ---- Week 5: strategy=learned ----
+
+def test_learned_feed_returns_probabilities_in_order(client):
+    response = client.get("/feed", params={"user_id": 1, "limit": 5, "strategy": "learned"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strategy"] == "learned"
+    posts = body["posts"]
+    assert len(posts) == 5
+    assert all(0.0 < p["score"] < 1.0 for p in posts)
+    keys = [(-p["score"], p["post_id"]) for p in posts]
+    assert keys == sorted(keys)
+    assert not {p["post_id"] for p in posts} & own_and_liked_post_ids(1)
+
+
+def test_learned_feed_for_cold_start_and_unknown_user(client):
+    assert len(client.get("/feed", params={"user_id": 8, "strategy": "learned"}).json()["posts"]) == 20
+    assert client.get("/feed", params={"user_id": 999, "strategy": "learned"}).status_code == 404

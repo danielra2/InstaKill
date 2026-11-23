@@ -65,7 +65,7 @@ LIKES = [
 def seed() -> None:
     init_db()
     with get_connection() as conn:
-        for table in ('"like"', "follow", "post", "user"):
+        for table in ("post_tag", '"like"', "follow", "post", "user"):
             conn.execute(f"DELETE FROM {table}")
         conn.execute(
             "DELETE FROM sqlite_sequence WHERE name IN ('user', 'post')"

@@ -1,15 +1,16 @@
 # API contract
 
-- [`GET /feed`](#get-feed): **implemented** (Week 4)
+- [`GET /feed`](#get-feed): **implemented** (Week 4; `strategy=learned` Week 5)
 - [`GET /search`](#get-search): **implemented** (Week 3)
-- [`POST /posts`](#post-posts): planned, not implemented (Week 2)
+- [`POST /posts`](#post-posts): **implemented** (contract Week 2, code Week 5)
+- [Users, follows, likes](#users-follows-likes-week-5): **implemented** (Week 5)
 
 ## `GET /feed`
 
 > Status: **implemented** in `app/api/feed.py` (Week 4).
 
-Returns the posts a user should see, ranked either by the `for_you` score or
-newest first.
+Returns the posts a user should see, ranked by the `for_you` score, by the
+learned model (`learned`), or newest first (`chronological`).
 
 ### Request
 
@@ -19,7 +20,7 @@ newest first.
 |------------|---------|----------|-------|
 | `user_id`  | integer | yes      | Id of the viewing user. Must exist. |
 | `limit`    | integer | no (default `20`) | 1–50 inclusive. |
-| `strategy` | string  | no (default `for_you`) | `for_you` or `chronological`. |
+| `strategy` | string  | no (default `for_you`) | `for_you`, `learned` or `chronological`. |
 
 Candidates: every post **except** the viewer's own posts and posts the viewer already liked.
 
@@ -40,11 +41,15 @@ Candidates: every post **except** the viewer's own posts and posts the viewer al
 
 `200 OK`, strategy `chronological`: same shape, but posts have **no `score`** field.
 
+`200 OK`, strategy `learned`: same shape; `score` is the predicted probability of a
+like, in (0, 1), from the Lab 5 network (`models/like_model.npz`, see README).
+
 - `posts` has **at most** `limit` items (fewer if there are fewer candidates).
 - `user_id` inside a post is the **author**; the top-level `user_id` is the viewer.
 - `created_at` is UTC, ISO 8601, without a timezone suffix.
 - `for_you`: ordered by **descending `score`**, ties by **ascending `post_id`**.
   `score = 1.0 * freshness + 2.0 * affinity + 1.0 * popularity` (see README).
+- `learned`: ordered by **descending `score`**, ties by **ascending `post_id`**.
 - `chronological`: ordered by **newest `created_at`**, ties by **ascending `post_id`**.
 
 ### Validation and error cases
@@ -54,7 +59,8 @@ Candidates: every post **except** the viewer's own posts and posts the viewer al
 | `404 Not Found` | `user_id` does not exist. | `{"detail": "User 999 does not exist."}` |
 | `422 Unprocessable Entity` | `user_id` missing or not an integer. | FastAPI's standard `{"detail": [...]}` |
 | `422 Unprocessable Entity` | `limit` not an integer, < 1 or > 50. | FastAPI's standard `{"detail": [...]}` |
-| `422 Unprocessable Entity` | `strategy` is not `for_you` or `chronological`. | FastAPI's standard `{"detail": [...]}` |
+| `422 Unprocessable Entity` | `strategy` is not `for_you`, `learned` or `chronological`. | FastAPI's standard `{"detail": [...]}` |
+| `503 Service Unavailable` | `strategy=learned` but the model could not be loaded. | `{"detail": "The learned model is not loaded."}` |
 
 ---
 
@@ -111,9 +117,9 @@ Example: `GET /search?q=machine%20learning&limit=2`
 
 ## `POST /posts`
 
-> Status: **contract only, not implemented yet** (Week 2).
-> The endpoint will be a thin HTTP layer over `PostService.create_post`
-> in `app/services/post_service.py`.
+> Status: **implemented** in `app/api/social.py` (Week 5), a thin HTTP layer over
+> `PostService.create_post` in `app/services/post_service.py`.
+> `GET /posts/{id}` returns the same `Post` body, or `404` `{"detail": "Post 999 does not exist."}`.
 
 Creates a new post for an existing user.
 
@@ -169,5 +175,23 @@ The body is the `Post` domain model (`app/domain/models.py`). `id` and
 
 ### Out of scope
 
-No authentication, editing, deleting, listing, feed, ranking, or search.
-Those come in later weeks.
+No authentication, editing, deleting or listing of posts.
+
+---
+
+## Users, follows, likes (Week 5)
+
+> Status: **implemented** in `app/api/social.py`, rules in `app/services/social_service.py`.
+
+| Method and path | Body / query | Success | Errors |
+|---|---|---|---|
+| `POST /users` | `{"username": "zoe_99"}` (trimmed; 3-30 letters, digits, `_`) | `201` `{"id", "username", "created_at"}` | `422` bad username, `409` username taken |
+| `GET /users/{id}` | | `200` same body | `404` `{"detail": "User 999 does not exist."}` |
+| `POST /follows` | `{"follower_id": 8, "followee_id": 1}` | `201` `{"follower_id", "followee_id", "created_at"}` | `422` follow yourself, `404` unknown user, `409` already following |
+| `DELETE /follows?follower_id=8&followee_id=1` | | `204` no body | `404` not following |
+| `POST /likes` | `{"user_id": 8, "post_id": 1}` | `201` `{"user_id", "post_id", "created_at"}` | `404` unknown user or post, `409` already liked |
+| `DELETE /likes?user_id=8&post_id=1` | | `204` no body | `404` not liked |
+
+Missing fields or wrong types give FastAPI's standard `422` `{"detail": [...]}`.
+A like removes the post from that user's feed candidates; a follow raises the
+author's `for_you` affinity.

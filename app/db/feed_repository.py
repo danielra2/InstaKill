@@ -1,4 +1,6 @@
 """Repository boundary for the feed: the only feed code that runs SQL."""
+from datetime import datetime
+
 from app.db.database import get_connection
 from app.domain.models import Post
 
@@ -53,5 +55,46 @@ class SqliteFeedRepository:
         with get_connection() as conn:
             rows = conn.execute(
                 'SELECT post_id, COUNT(*) AS n FROM "like" GROUP BY post_id'
+            ).fetchall()
+        return {row["post_id"]: row["n"] for row in rows}
+
+    # ---- Week 5: extra reads for the learned strategy ----
+
+    def post_tags(self) -> dict[int, frozenset[str]]:
+        """post_id -> its tags (posts without tags are absent)."""
+        with get_connection() as conn:
+            rows = conn.execute("SELECT post_id, tag FROM post_tag").fetchall()
+        tags: dict[int, set[str]] = {}
+        for row in rows:
+            tags.setdefault(row["post_id"], set()).add(row["tag"])
+        return {post_id: frozenset(t) for post_id, t in tags.items()}
+
+    def liked_tag_counts(self, user_id: int) -> dict[str, int]:
+        """tag -> how many posts with that tag `user_id` liked."""
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT t.tag, COUNT(*) AS n
+                FROM "like" AS l JOIN post_tag AS t ON t.post_id = l.post_id
+                WHERE l.user_id = ?
+                GROUP BY t.tag
+                """,
+                (user_id,),
+            ).fetchall()
+        return {row["tag"]: row["n"] for row in rows}
+
+    def user_like_count(self, user_id: int) -> int:
+        with get_connection() as conn:
+            row = conn.execute(
+                'SELECT COUNT(*) AS n FROM "like" WHERE user_id = ?', (user_id,)
+            ).fetchone()
+        return int(row["n"])
+
+    def post_like_counts_since(self, since: datetime) -> dict[int, int]:
+        """post_id -> likes with created_at >= `since` (naive UTC)."""
+        with get_connection() as conn:
+            rows = conn.execute(
+                'SELECT post_id, COUNT(*) AS n FROM "like" WHERE created_at >= ? GROUP BY post_id',
+                (since.strftime("%Y-%m-%d %H:%M:%S"),),
             ).fetchall()
         return {row["post_id"]: row["n"] for row in rows}

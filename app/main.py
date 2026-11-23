@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.api.feed import router as feed_router
 from app.api.search import router as search_router
+from app.api.social import router as social_router
 from app.db.database import init_db
 from app.db.post_repository import SqlitePostRepository
 from app.search.encoder import SentenceTransformerEncoder
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="InstaKill", lifespan=lifespan)
 app.include_router(search_router)
 app.include_router(feed_router)
+app.include_router(social_router)
 
 
 @app.get("/health")

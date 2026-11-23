@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS "like" (
     PRIMARY KEY (user_id, post_id)
 );
 CREATE INDEX IF NOT EXISTS idx_like_post ON "like"(post_id);
+
+-- Week 5: topic tags of a post (for MovieLens posts: the movie's genres).
+-- A separate table, so an existing instakill.db gets it without a migration.
+CREATE TABLE IF NOT EXISTS post_tag (
+    post_id INTEGER NOT NULL REFERENCES post(id),
+    tag TEXT NOT NULL,
+    PRIMARY KEY (post_id, tag)
+);
 """
 
 
